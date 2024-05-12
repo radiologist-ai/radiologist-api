@@ -12,6 +12,8 @@ numpy = "^1.26.4"
 torch = { version = "2.2.1", source="torch"}
 torchvision = { version = "0.17.1", source="torch"}
 
+grpcio-tools = "^1.63.0"
+grpcio = "^1.63.0"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
