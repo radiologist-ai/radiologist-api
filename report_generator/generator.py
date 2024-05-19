@@ -1,6 +1,10 @@
+import io
 from argparse import Namespace
 
+import requests
 import torch
+from torchvision import transforms
+from PIL import Image
 
 from .models import LAMRGModel_v12, Tokenizer
 
@@ -78,11 +82,46 @@ args = Namespace(
 
 class ReportGenerator:
     def __init__(self, model_path: str):
-        self.args = args
-        self.model_path = model_path
-        self.tokenizer = Tokenizer(self.args)
-        self.model = LAMRGModel_v12(self.args, self.tokenizer)
-        print(self.model.load_state_dict(torch.load(self.model_path)['state_dict']))
-        self.model.eval()
-#     TODO methods for report generation
+        self.DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.args: Namespace = args
+        self.model_path: str = model_path
+        self.tokenizer: Tokenizer = Tokenizer(self.args)
+        self.model: LAMRGModel_v12 = LAMRGModel_v12(self.args, self.tokenizer)
 
+        #  load model from .pth
+        if torch.cuda.is_available():
+            print(self.model.load_state_dict(torch.load(self.model_path)['state_dict']))
+            self.model.to(self.DEVICE)
+        else:
+            print(self.model.load_state_dict(torch.load(self.model_path, map_location=self.DEVICE)['state_dict']))
+
+        self.model.eval()
+
+        normalize = transforms.Normalize(mean=[0.500, 0.500, 0.500],
+                                         std=[0.275, 0.275, 0.275])
+
+        self.transform = transforms.Compose([
+                transforms.Resize(args.image_size),
+                transforms.CenterCrop(args.crop_size),
+                transforms.ToTensor(),
+                normalize])
+
+    def generate_report(self, link_to_xray: str) -> str:
+        img = self.download_xray(link_to_xray)
+        img = self.transform(img)
+        report = self.__generate_report(img)
+        return report
+
+    @staticmethod
+    def download_xray(link_to_xray: str) -> Image:
+        r = requests.get(link_to_xray, stream=True)
+        if r.status_code != 200:
+            raise requests.RequestException
+
+        img = Image.open(io.BytesIO(r.content))
+        return img.convert('RGB')
+
+    def __generate_report(self, image: torch.Tensor) -> str:
+        images = torch.stack([image,], 0).to(self.DEVICE)
+        outputs = self.model(images, mode='sample')
+        return self.model.tokenizer.decode_batch(outputs[0].cpu().numpy())[0]
